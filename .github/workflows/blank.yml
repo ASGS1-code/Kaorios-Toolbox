@@ -1,0 +1,173 @@
+name: Modify Framework and Services
+
+on:
+  workflow_dispatch:
+    inputs:
+      jar_urls:
+        description: 'JSON object containing URLs to download the JAR files'
+        required: true
+        default: '{"framework_jar_url": "", "services_jar_url": "", "miui_services_jar_url": "", "miui_framework_jar_url": ""}'
+      android_api_level:
+        description: 'Android API level'
+        required: true
+        default: '34'
+      features:
+        description: 'JSON object containing feature flags'
+        required: true
+        default: '{"isCN": "true", "defaultcore": "true", "core": "false", "fixNotification": "true", "addGboard": "false", "disableFlagSecure": "true", "multiFloatingWindow": "true"}'
+      custom_device_name:
+        description: 'Device Name'
+        required: true
+      custom_version:
+        description: 'Version'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      actions: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '11'
+
+    - name: install dependencies
+      run: |
+        echo "deb http://archive.ubuntu.com/ubuntu noble main universe" | sudo tee /etc/apt/sources.list
+        sudo apt-get update
+        sudo apt-get install -y --fix-missing default-jdk zipalign p7zip-full python3 aria2 jq
+        pip install gdown
+
+
+    - name: Write inputs to files
+      run: |
+        echo '${{ github.event.inputs.jar_urls }}' > jar_urls.json
+        echo '${{ github.event.inputs.features }}' > features.json
+
+    - name: Parse JSON inputs & Set environment variables
+      run: |
+        framework_jar_url=$(jq -r .framework_jar_url jar_urls.json)
+        services_jar_url=$(jq -r .services_jar_url jar_urls.json)
+        miui_services_jar_url=$(jq -r .miui_services_jar_url jar_urls.json)
+        miui_framework_jar_url=$(jq -r .miui_framework_jar_url jar_urls.json)
+        android_api_level=${{ github.event.inputs.android_api_level }}
+
+        isCN=$(jq -r .isCN features.json)
+        defaultcore=$(jq -r .defaultcore features.json)
+        core=$(jq -r .core features.json)
+        fixNotification=$(jq -r .fixNotification features.json)
+        addGboard=$(jq -r .addGboard features.json)
+        disableFlagSecure=$(jq -r .disableFlagSecure features.json)
+        multiFloatingWindow=$(jq -r .multiFloatingWindow features.json)
+        
+        if [ $android_api_level -gt 34 ]; then
+          isa15=true
+        else
+          isa15=false
+        fi
+
+        # Export variables for use in subsequent steps
+        echo "framework_jar_url=$framework_jar_url" >> $GITHUB_ENV
+        echo "services_jar_url=$services_jar_url" >> $GITHUB_ENV
+        echo "miui_services_jar_url=$miui_services_jar_url" >> $GITHUB_ENV
+        echo "miui_framework_jar_url=$miui_framework_jar_url" >> $GITHUB_ENV
+
+        echo "isCN=$isCN" >> $GITHUB_ENV
+        echo "defaultcore=$defaultcore" >> $GITHUB_ENV
+        echo "core=$core" >> $GITHUB_ENV
+        echo "fixNotification=$fixNotification" >> $GITHUB_ENV
+        echo "addGboard=$addGboard" >> $GITHUB_ENV
+        echo "disableFlagSecure=$disableFlagSecure" >> $GITHUB_ENV
+        echo "multiFloatingWindow=$multiFloatingWindow" >> $GITHUB_ENV
+        echo "isa15=$isa15" >> $GITHUB_ENV
+
+    - name: Download and validate JARs
+      run: |
+        download_file() {
+          url=$1
+          output=$2
+          if echo "$url" | grep -q "drive.google.com"; then
+            gdown --fuzzy -O "$output" "$url"
+          else
+            curl -L -C - -o "$output" "$url"
+          fi
+        }
+
+        download_file "${{ env.framework_jar_url }}" framework.jar
+        download_file "${{ env.services_jar_url }}" services.jar
+        download_file "${{ env.miui_services_jar_url }}" miui-services.jar
+        download_file "${{ env.miui_framework_jar_url }}" miui-framework.jar
+
+        for jar in framework.jar services.jar miui-services.jar miui-framework.jar; do
+          file_size=$(stat -c%s "$jar")
+          if [ $file_size -lt 1500000 ]; then
+            echo "Error: $jar is too small. Download might have failed." >&2
+            exit 1
+          fi
+        done
+
+    - name: Extract framework.jar
+      run: 7z x framework.jar -oframework
+
+    - name: Extract services.jar
+      run: 7z x services.jar -oservices
+
+    - name: Extract miui-services.jar
+      run: 7z x miui-services.jar -omiui_services
+
+    - name: Extract miui-framework.jar
+      run: 7z x miui-framework.jar -omiui_framework
+
+    - name: Decompile framework dex files if available
+      run: |
+        if [ -f framework/classes.dex ]; then
+          java -jar baksmali.jar d -a ${{ github.event.inputs.android_api_level }} framework/classes.dex -o classes
+        else
+          echo "framework/classes.dex not found, skipping decompilation."
+        fi
+        for i in {2..5}; do
+          if # This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v4
+
+      # Runs a single command using the runners shell
+      - name: Run a one-line script
+        run: echo Hello, world!
+
+      # Runs a set of commands using the runners shell
+      - name: Run a multi-line script
+        run: |
+          echo Add other actions to build,
+          echo test, and deploy your project.
